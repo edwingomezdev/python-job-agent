@@ -6,6 +6,7 @@ import json
 import requests
 from google import genai
 from google.genai import types
+from groq import Groq  # Importamos el SDK oficial
 
 # Configuración de logging estructurado
 logging.basicConfig(
@@ -42,12 +43,13 @@ def save_to_history(company: str, email: str) -> None:
         logger.error(f"Error guardando en el historial: {e}")
 
 # Validación Fail Fast de entorno
+# Validación Fail Fast de entorno actualizada
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
 
-if not GEMINI_API_KEY or not N8N_WEBHOOK_URL:
-    logger.error("Faltan variables de entorno requeridas (GEMINI_API_KEY o N8N_WEBHOOK_URL).")
+if not GEMINI_API_KEY or not GROQ_API_KEY or not N8N_WEBHOOK_URL:
+    logger.error("Faltan variables de entorno requeridas (GEMINI_API_KEY, GROQ_API_KEY o N8N_WEBHOOK_URL).")
     sys.exit(1)
 
 # Perfil técnico de búsqueda
@@ -76,33 +78,39 @@ def fetch_remote_jobs() -> list[dict]:
         logger.error(f"Error consultando la API de empleos: {e}")
         return []
 
+
 def evaluate_with_groq(prompt: str) -> dict | None:
-    """Proveedor Secundario (Fallback): Ejecuta el prompt en Groq usando Llama 3."""
+    """Proveedor Secundario (Fallback): Ejecuta el prompt en Groq usando el modelo oficial detectado."""
     if not GROQ_API_KEY:
         logger.warning("GROQ_API_KEY no configurada. No se puede ejecutar el fallback.")
         return None
     
-    logger.info("🔄 Activando Fallback Multi-Proveedor: Consultando Groq (Llama 3)...")
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.2
-    }
+    logger.info("🔄 Activando Fallback Multi-Proveedor: Consultando Groq con modelo oficial...")
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        result = response.json()
-        content = result["choices"][0]["message"]["content"]
+        # Inicializa usando la variable de entorno o la llave cargada
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        
+        completion = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",  # El modelo exacto que encontraste en la consola de Groq
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            response_format={"type": "json_object"},  # Clave para que devuelva JSON puro
+            temperature=0.2,
+            max_completion_tokens=2048,
+            top_p=1,
+            stream=False  # Lo ponemos en False porque tu agente necesita el JSON completo de un solo golpe, no por partes (streaming)
+        )
+        
+        content = completion.choices[0].message.content
         return json.loads(content)
+        
     except Exception as e:
-        logger.error(f"Error en el Fallback con Groq: {e}")
+        logger.error(f"Error en el Fallback con Groq (SDK): {e}")
         return None
 
 def evaluate_and_extract_job(job_raw: dict, ai_client: genai.Client) -> dict | None:
