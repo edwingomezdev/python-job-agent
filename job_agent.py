@@ -92,7 +92,7 @@ def evaluate_with_groq(prompt: str) -> dict | None:
         groq_client = Groq(api_key=GROQ_API_KEY)
         
         completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",  # El modelo exacto que encontraste en la consola de Groq
+            model="qwen/qwen3.8-27b",  # El modelo exacto que encontraste en la consola de Groq
             messages=[
                 {
                     "role": "user",
